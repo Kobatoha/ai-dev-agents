@@ -1,0 +1,28 @@
+ollama:
+  base_url: "http://127.0.0.1:11434"
+  models:
+    architect: "qwen2.5-coder:7b"
+    coder: "qwen2.5-coder:7b"
+    reviewer: "qwen2.5-coder:7b"
+  timeout: 300
+
+agents:
+  tech_lead:
+    role: "Tech Lead & Architect"
+    temperature: 0.3
+    max_tokens: 2048
+  
+  senior_dev:
+    role: "Senior Python Developer"
+    temperature: 0.2
+    max_tokens: 4096
+  
+  reviewer:
+    role: "Code Reviewer & QA"
+    temperature: 0.1
+    max_tokens: 2048
+
+workspace:
+  project_path: "./workspace/pet_game"
+  tasks_path: "./tasks"
+  logs_path: "./logs"
