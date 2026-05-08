@@ -1,7 +1,7 @@
 from typing import Optional
 
-from agents.git_manager import GitManager
-from core.agent_base import BaseAgent, Message
+from ai_agents.agents.git_manager import GitManager
+from ai_agents.core.agent_base import BaseAgent, Message
 import json
 import subprocess
 import re
@@ -13,24 +13,29 @@ import aiofiles
 class Reviewer(BaseAgent):
     def __init__(self, model: str, config: dict):
         super().__init__("reviewer", "Code Reviewer & QA", model, config)
-        self.workspace = Path("./workspace/pet_game")
+
+        agents_root = Path(__file__).parent.parent  # ai_agents/
+        self.workspace = (agents_root / ".." / "pet_game").resolve()
         self.tests_dir = self.workspace / "tests"
         self.tests_dir.mkdir(parents=True, exist_ok=True)
+
+        self.git = GitManager(str(self.workspace))
+
         self.max_review_iterations = 3
         self.review_count = {}
-        self.test_files = []  # Список созданных тестовых файлов
-        self.git = GitManager(str(self.workspace))
+        self.test_files = []  # ← ДОБАВЬТЕ ЭТУ СТРОКУ
+
         self.system_prompt = """Ты - строгий Code Reviewer и QA инженер.
-Проверяешь код и пишешь тесты.
+    Проверяешь код и пишешь тесты.
 
-Всегда создавай ТОЛЬКО pytest тесты с именем функции начиная с test_
+    Всегда создавай ТОЛЬКО pytest тесты с именем функции начиная с test_
 
-Формат ответа:
-JSON с полем "test_code" содержащим ГОТОВЫЙ К ЗАПУСКУ код тестов
-или
-Просто код тестов с импортами
+    Формат ответа:
+    JSON с полем "test_code" содержащим ГОТОВЫЙ К ЗАПУСКУ код тестов
+    или
+    Просто код тестов с импортами
 
-Тесты должны быть простыми и проверять функциональность."""
+    Тесты должны быть простыми и проверять функциональность."""
 
     async def process_message(self, message: Message) -> Optional[Message]:
         print(f"🟡 [Reviewer] Получено сообщение: {message.msg_type}")
@@ -99,44 +104,44 @@ JSON с полем "test_code" содержащим ГОТОВЫЙ К ЗАПУС
         return self._make_decision(message, test_result, style_issues, iteration)
 
     async def _generate_tests(self, task_desc: str, project_code: str) -> str:
-        """Генерирует тесты через модель"""
-        prompt = f"""
-Задача: {task_desc[:200]}
+        """Генерирует РЕАЛЬНЫЕ тесты"""
 
-Код проекта:
-{project_code[:2000]}
+        import re
+        functions = re.findall(r'def (\w+)\(', project_code)
+        classes = re.findall(r'class (\w+)', project_code)
 
-Напиши pytest тесты для проверки функциональности.
-Тесты должны быть в ОТДЕЛЬНОМ файле tests/test_<feature>.py
-
-Импорты должны быть правильными:
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-Пиши ТОЛЬКО код тестов, без markdown.
-Каждый тест должен начинаться с def test_
-"""
-
-        response = await self.think(prompt, self.system_prompt)
-
-        if not response:
+        if not functions and not classes:
+            print("⚠️ [Reviewer] Нет функций для тестирования")
             return ""
 
-        # Очищаем от markdown
-        test_code = response
-        if '```python' in test_code:
-            start = test_code.find('```python') + 10
-            end = test_code.find('```', start)
-            if end > start:
-                test_code = test_code[start:end]
-        elif '```' in test_code:
-            start = test_code.find('```') + 3
-            end = test_code.find('```', start)
-            if end > start:
-                test_code = test_code[start:end]
+        # Пример кода для тестов (без f-string конфликта)
+        example_test = '''def test_example(client):
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}'''
 
-        return test_code.strip()
+        prompt = f"""Задача: {task_desc[:200]}
+
+    Найденные функции: {', '.join(functions[:5])}
+    Найденные классы: {', '.join(classes[:3])}
+
+    Код проекта:
+    {project_code[:1500]}
+
+    Напиши РАБОЧИЕ pytest тесты.
+    Правила:
+    1. Импортируй ТОЛЬКО существующие функции/классы
+    2. Каждый тест должен проверять КОНКРЕТНЫЙ результат
+    3. Используй assert с реальными значениями
+
+    Пример правильного теста:
+    {example_test}
+
+    Напиши 2-3 теста. Только код, без markdown.
+    """
+
+        response = await self.think(prompt, self.system_prompt)
+        return response
 
     async def _save_tests(self, test_code: str, task_id: str) -> Path:
         """Сохраняет тесты в файл"""
@@ -264,12 +269,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
         return issues[:3]
 
     async def _run_tests(self, test_file_path: Path = None) -> dict:
-        """Запускает тесты через pytest"""
+        """Запускает тесты. НЕ принимает пустые."""
         if not test_file_path or not test_file_path.exists():
             return {
-                'passed': True,
-                'errors': '',
-                'summary': 'Нет файла с тестами (принято)'
+                'passed': False,  # ИЗМЕНЕНО: False вместо True
+                'errors': 'Файл тестов не найден',
+                'summary': '❌ Тесты не созданы'
+            }
+
+        # Проверяем что файл не пустой
+        if test_file_path.stat().st_size < 50:
+            return {
+                'passed': False,
+                'errors': 'Файл тестов пустой',
+                'summary': '❌ Тесты пустые'
             }
 
         try:

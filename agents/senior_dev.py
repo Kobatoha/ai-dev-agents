@@ -1,12 +1,12 @@
-from typing import Optional
-
-from core.agent_base import BaseAgent, Message
-from pathlib import Path
 import json
 import aiofiles
+
+from typing import Optional
+from pathlib import Path
 from datetime import datetime
-from agents.git_manager import GitManager
-from core.protected_files import ProtectedFiles
+
+from ai_agents.agents.git_manager import GitManager
+from ai_agents.core.agent_base import BaseAgent, Message
 
 
 class SeniorDev(BaseAgent):
@@ -32,7 +32,6 @@ class SeniorDev(BaseAgent):
             - Каждый файл начинай с комментария # file: path/to/file.py
             - Не добавляй markdown-объяснения в код, только комментарии в коде
         """
-
 
     async def process_message(self, message: Message) -> Optional[Message]:
         print(f"🟢 [SeniorDev] Получено сообщение: {message.msg_type}")
@@ -141,45 +140,65 @@ class SeniorDev(BaseAgent):
         return "\n\n".join(code_sections) if code_sections else "Файлов пока нет"
 
     async def _save_code_smart(self, code: str, target_files: list, mode: str) -> list:
-        """Умное сохранение кода (создание или дополнение)"""
+        """Сохранение кода - ВСЕГДА дополняем существующие файлы"""
         saved_files = []
 
-        # Разбиваем код на файлы по маркерам
-        file_blocks = self._split_code_blocks(code)
+        from ai_agents.core.protected_files import ProtectedFiles
         protected = ProtectedFiles(str(self.workspace))
 
-        for filename, block_content in file_blocks:
-            if protected.is_protected(filename):
-                print(f"🔒 [SeniorDev] Файл {filename} защищен от изменений! Пропускаю.")
-                continue
+        file_blocks = self._split_code_blocks(code)
+
+        if not file_blocks:
+            print("⚠️ [SeniorDev] Не удалось извлечь код из ответа модели")
+            return saved_files
 
         for filename, block_content in file_blocks:
             file_path = self.workspace / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            if mode == "modify" and file_path.exists():
-                # Читаем существующий код
-                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                    existing_content = await f.read()
-
-                # Проверяем, не дублируется ли код
-                if block_content.strip() not in existing_content:
-                    # Дополняем файл
-                    new_content = existing_content.rstrip() + "\n\n# === Новый код (добавлен автоматически) ===\n" + block_content
-                    async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                        await f.write(new_content)
-
-                    print(f"   📝 Дополнен: {file_path} (+{len(block_content)} симв)")
+            # Проверяем защиту
+            if protected.is_protected(filename):
+                if mode == "overwrite":
+                    print(f"🚫 [SeniorDev] Файл {filename} ЗАЩИЩЕН от перезаписи!")
+                    # Создаем альтернативный файл
+                    alt_filename = filename.replace('.py', '_new.py')
+                    file_path = self.workspace / alt_filename
+                    print(f"   💾 Создан альтернативный: {alt_filename}")
                 else:
-                    print(f"   ⏭️ Пропущен: {file_path} (код уже существует)")
-            else:
-                # Создаем новый файл
-                async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                    await f.write(block_content)
+                    print(f"🔒 [SeniorDev] Дополняю защищенный файл: {filename}")
 
-                print(f"   ✨ Создан: {file_path} ({len(block_content)} симв)")
+            # Записываем ВСЕГДА (дополняем или создаем)
+            try:
+                if file_path.exists():
+                    # Читаем существующий
+                    async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                        existing = await f.read()
 
-            saved_files.append(filename)
+                    # Извлекаем только НОВЫЙ код (не дублируем)
+                    new_parts = []
+                    for line in block_content.split('\n'):
+                        if line.strip() and line.strip() not in existing:
+                            new_parts.append(line)
+
+                    if new_parts:
+                        new_code = '\n'.join(new_parts)
+                        # Дополняем файл
+                        updated = existing.rstrip() + '\n\n# === Added by AI developer ===\n' + new_code + '\n'
+                        async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
+                            await f.write(updated)
+                        print(f"   📝 Дополнен: {filename} (+{len(new_code)} симв)")
+                    else:
+                        print(f"   ℹ️ {filename}: новый код уже существует, пропущено")
+                else:
+                    # Создаем новый файл
+                    async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
+                        await f.write(block_content)
+                    print(f"   ✨ Создан: {filename} ({len(block_content)} симв)")
+
+                saved_files.append(filename)
+
+            except Exception as e:
+                print(f"   ❌ Ошибка сохранения {filename}: {e}")
 
         return saved_files
 

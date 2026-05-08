@@ -11,6 +11,9 @@ from agents.tech_lead import TechLead
 from agents.senior_dev import SeniorDev
 from agents.reviewer import Reviewer
 
+# ИЗМЕНЕНО: Добавлена глобальная переменная для корня агентов
+AGENTS_ROOT = Path(__file__).parent
+
 
 async def process_user_request(message_bus, request):
     """Обработка запроса пользователя"""
@@ -51,22 +54,23 @@ async def process_user_request(message_bus, request):
                 print("📋 ПРОВЕРКА РЕЗУЛЬТАТА")
                 print("=" * 50)
 
-                # Показываем измененные файлы
-                workspace = Path("./workspace/pet_game")
-                if workspace.exists():
+                # ИЗМЕНЕНО: Путь к проекту относительно агентов
+                project_path = (AGENTS_ROOT / ".." / "pet_game").resolve()
+
+                if project_path.exists():
                     print("\n📁 Последние изменения:")
 
                     # Показываем последние измененные файлы
-                    py_files = sorted(workspace.rglob("*.py"), key=lambda x: x.stat().st_mtime, reverse=True)
+                    py_files = sorted(project_path.rglob("*.py"), key=lambda x: x.stat().st_mtime, reverse=True)
                     for f in py_files[:5]:  # Последние 5 файлов
                         mtime = datetime.fromtimestamp(f.stat().st_mtime)
                         print(
-                            f"  • {f.relative_to(workspace)} ({f.stat().st_size} байт) - изменен {mtime.strftime('%H:%M:%S')}")
+                            f"  • {f.relative_to(project_path)} ({f.stat().st_size} байт) - изменен {mtime.strftime('%H:%M:%S')}")
 
                     # Показываем содержимое самого большого измененного файла
                     if py_files:
                         latest_file = max(py_files, key=lambda x: x.stat().st_size)
-                        print(f"\n📄 Содержимое {latest_file.relative_to(workspace)}:")
+                        print(f"\n📄 Содержимое {latest_file.relative_to(project_path)}:")
                         print("-" * 40)
                         try:
                             with open(latest_file, 'r', encoding='utf-8') as f:
@@ -77,8 +81,8 @@ async def process_user_request(message_bus, request):
                         except:
                             print("⚠️ Не удалось прочитать файл")
 
-                # Показываем отчеты
-                reports_dir = workspace / "reports"
+                # ИЗМЕНЕНО: Отчеты в папке .ai_reports проекта
+                reports_dir = project_path.parent / ".ai_reports"
                 if reports_dir.exists():
                     report_files = sorted(reports_dir.glob("report_*.txt"), key=lambda x: x.stat().st_mtime,
                                           reverse=True)
@@ -91,12 +95,12 @@ async def process_user_request(message_bus, request):
                         except:
                             print("⚠️ Не удалось прочитать отчет")
 
-                # Показываем логи Git
+                # ИЗМЕНЕНО: Git log из корня проекта
                 try:
                     import subprocess
                     result = subprocess.run(
                         ['git', 'log', '--oneline', '-3'],
-                        cwd=str(workspace),
+                        cwd=str(project_path.parent),  # Корень WitchsStory
                         capture_output=True,
                         text=True
                     )
@@ -117,8 +121,11 @@ async def process_user_request(message_bus, request):
                         # ✅ Подтверждаем задачу
                         task_id = msg.task_id
 
-                        # Обновляем статус задачи
-                        task_file = Path("./tasks") / f"{task_id}.json"
+                        # ИЗМЕНЕНО: Путь к задачам
+                        tasks_dir = project_path.parent / ".ai_tasks"
+                        tasks_dir.mkdir(exist_ok=True)
+
+                        task_file = tasks_dir / f"{task_id}.json"
                         if task_file.exists():
                             try:
                                 with open(task_file, 'r') as f:
@@ -131,12 +138,12 @@ async def process_user_request(message_bus, request):
                                 pass
 
                         # Добавляем файлы в защищенную зону
-                        protected_file = workspace / ".protected"
+                        protected_file = project_path / ".protected"
                         with open(protected_file, 'a', encoding='utf-8') as f:
                             f.write(f"\n# Задача {task_id} - подтверждена {datetime.now()}\n")
-                            py_files = sorted(workspace.rglob("*.py"), key=lambda x: x.stat().st_mtime, reverse=True)
+                            py_files = sorted(project_path.rglob("*.py"), key=lambda x: x.stat().st_mtime, reverse=True)
                             for pf in py_files[:3]:  # Последние 3 измененных файла
-                                f.write(f"{pf.relative_to(workspace)}\n")
+                                f.write(f"{pf.relative_to(project_path)}\n")
 
                         print("✅ Задача подтверждена! Код добавлен в защищенную зону.")
                         print("   Эти файлы больше не будут изменяться без явного запроса.")
@@ -160,7 +167,7 @@ async def process_user_request(message_bus, request):
 
             return True
 
-        if i % 15 == 0 and i > 0:
+        if i % 30 == 0 and i > 0:  # ИЗМЕНЕНО: 15 -> 30 для меньшего шума
             print(f"⏰ Работаем... ({i}с)")
 
     print("\n⚠️ Время ожидания истекло (1200с)")
@@ -169,22 +176,23 @@ async def process_user_request(message_bus, request):
 
 def show_project_stats():
     """Показывает статистику проекта"""
-    workspace = Path("./workspace/pet_game")
-    tasks_dir = Path("./tasks")
-    logs_dir = Path("./logs")
+    # ИЗМЕНЕНО: Все пути относительно агентов
+    project_path = (AGENTS_ROOT / ".." / "pet_game").resolve()
+    tasks_dir = (AGENTS_ROOT / ".." / ".ai_tasks").resolve()
+    logs_dir = (AGENTS_ROOT / ".." / ".ai_logs").resolve()
 
     print("\n" + "=" * 60)
     print("📊 СТАТИСТИКА ПРОЕКТА")
     print("=" * 60)
 
     # Файлы
-    if workspace.exists():
-        py_files = list(workspace.rglob("*.py"))
+    if project_path.exists():
+        py_files = list(project_path.rglob("*.py"))
         if py_files:
             print(f"\n💻 Python файлы ({len(py_files)}):")
             for f in py_files:
                 size = f.stat().st_size
-                print(f"  • {f.relative_to(workspace)} ({size} байт)")
+                print(f"  • {f.relative_to(project_path)} ({size} байт)")
         else:
             print("\n💻 Python файлы: пока нет")
 
@@ -216,13 +224,31 @@ def show_project_stats():
 
 
 async def main():
+    # ИЗМЕНЕНО: Все пути относительно AGENTS_ROOT
+    agents_root = Path(__file__).parent
+
     # Загружаем конфиг
-    with open("config.yaml", 'r', encoding='utf-8') as f:
+    config_path = agents_root / "config.yaml"
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
     print("🔧 Инициализация системы...")
     print(f"📊 Модели: TechLead={config['ollama']['models']['architect']}, "
           f"Dev={config['ollama']['models']['coder']}")
+
+    # ИЗМЕНЕНО: Вычисляем пути
+    project_path = (agents_root / config['workspace']['project_path']).resolve()
+    tasks_path = (agents_root / config['workspace']['tasks_path']).resolve()
+    logs_path = (agents_root / config['workspace']['logs_path']).resolve()
+
+    # Создаем директории если нужно
+    project_path.mkdir(parents=True, exist_ok=True)
+    tasks_path.mkdir(parents=True, exist_ok=True)
+    logs_path.mkdir(parents=True, exist_ok=True)
+
+    print(f"📁 Проект: {project_path}")
+    print(f"📁 Задачи: {tasks_path}")
+    print(f"📁 Логи: {logs_path}")
 
     # Инициализируем компоненты
     ollama_client = OllamaClient(
@@ -230,7 +256,7 @@ async def main():
         config['ollama']['timeout']
     )
 
-    task_manager = TaskManager(config['workspace']['tasks_path'])
+    task_manager = TaskManager(str(tasks_path))
     message_bus = MessageBus()
 
     # Создаем агентов
@@ -241,10 +267,11 @@ async def main():
     )
     tech_lead.ollama_client = ollama_client
 
+    # ИЗМЕНЕНО: Передаем полный путь к проекту
     senior_dev = SeniorDev(
         config['ollama']['models']['coder'],
         config['agents']['senior_dev'],
-        config['workspace']['project_path']
+        str(project_path)
     )
     senior_dev.ollama_client = ollama_client
 
@@ -265,7 +292,7 @@ async def main():
     print("\n" + "=" * 60)
     print("🤖 СИСТЕМА ИИ-РАЗРАБОТКИ ГОТОВА!")
     print("💡 Для выхода: 'exit' или Ctrl+C")
-    print("💡 Для логов после выхода: python view_logs.py")
+    print(f"💡 Проект: {project_path}")
     print("=" * 60)
 
     try:
@@ -291,8 +318,7 @@ async def main():
 
     # Финальная статистика
     show_project_stats()
-    print("\n📝 Для просмотра логов: python view_logs.py")
-    print("👋 До свидания!")
+    print("\n👋 До свидания!")
 
 
 if __name__ == "__main__":
